@@ -1,21 +1,22 @@
-from datetime import datetime
-import uuid
-import json
 import asyncio
+import json
+import uuid
+from datetime import datetime
 from typing import AsyncIterator, List, Dict, Union, Any
+
 import numpy as np
-from loguru import logger
 from fastapi import WebSocket
+from loguru import logger
 
-from .live2d_model import Live2dModel
-from .asr.asr_interface import ASRInterface
 from .agent.agents.agent_interface import AgentInterface
-from .agent.output_types import BaseOutput, SentenceOutput, AudioOutput, Actions
 from .agent.input_types import BatchInput, TextData, ImageData, TextSource, ImageSource
-from .tts.tts_interface import TTSInterface
-
-from .utils.stream_audio import prepare_audio_payload
+from .agent.output_types import BaseOutput, SentenceOutput, AudioOutput, Actions
+from .asr.asr_interface import ASRInterface
 from .chat_history_manager import store_message
+from .live2d_model import Live2dModel
+from .translate.translate_interface import TranslateInterface
+from .tts.tts_interface import TTSInterface
+from .utils.stream_audio import prepare_audio_payload
 
 
 class TTSTaskManager:
@@ -113,6 +114,7 @@ async def conversation_chain(
     tts_engine: TTSInterface,
     live2d_model: Live2dModel,
     websocket_send: WebSocket.send,
+    translate_engine: TranslateInterface,
     conf_uid: str = "",
     history_uid: str = "",
     images: List[Dict[str, Any]] = None,
@@ -185,9 +187,20 @@ async def conversation_chain(
         # Process agent output
         agent_output: AsyncIterator[BaseOutput] = agent_engine.chat(batch_input)
 
+        logger.debug(f"🏃 tts_engine.__dict__ '''{tts_engine.__dict__}'''...")
+
         async for output in agent_output:
             if isinstance(output, SentenceOutput):
                 async for display_text, tts_text, actions in output:
+                    logger.debug(f"🏃 output '''{output}'''...")
+
+                    if translate_engine:
+                        tts_text = translate_engine.translate(tts_text)
+                        logger.info(f"🏃 Text after translation '''{tts_text}'''...")
+                    else:
+                        logger.info(
+                            "🚫 No translation engine available. Skipping translation."
+                        )
                     full_response += display_text
                     await tts_manager.speak(
                         tts_text=tts_text,
